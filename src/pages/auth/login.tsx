@@ -2,9 +2,9 @@ import type React from "react"
 import { useState } from "react"
 import { Mail, Lock, Eye, EyeOff, AlertCircle } from "lucide-react"
 import { AuthService, type UserData } from "../../service/authService"
-import { signInWithEmailAndPassword } from "firebase/auth"
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth"
 import { auth, db } from "../../service/firebaseConfig"
-import { doc, getDoc } from "firebase/firestore"
+import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore"
 import { useNavigate } from "react-router-dom"
 
 export default function Login() {
@@ -15,6 +15,11 @@ export default function Login() {
   const [touched, setTouched] = useState<{ email: boolean; password: boolean }>({ email: false, password: false })
   const [loading, setLoading] = useState<boolean>(false)
   const [authError, setAuthError] = useState<string>("")
+  const [showForgotPassword, setShowForgotPassword] = useState<boolean>(false)
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState<string>("")
+  const [forgotPasswordLoading, setForgotPasswordLoading] = useState<boolean>(false)
+  const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState<boolean>(false)
+  const [forgotPasswordError, setForgotPasswordError] = useState<string>("")
 
   const navigate = useNavigate()
 
@@ -135,6 +140,69 @@ export default function Login() {
     }
   }
 
+  const handleForgotPassword = async (): Promise<void> => {
+    const emailError = validateEmail(forgotPasswordEmail)
+    
+    if (emailError) {
+      setForgotPasswordError("Please enter a valid email address")
+      return
+    }
+
+    setForgotPasswordLoading(true)
+    setForgotPasswordError("")
+    setForgotPasswordSuccess(false)
+
+    try {
+      console.log("Sending password reset email to:", forgotPasswordEmail)
+      
+      // Send password reset email directly - Firebase Auth will handle user verification
+      await sendPasswordResetEmail(auth, forgotPasswordEmail)
+      console.log("Password reset email sent successfully")
+      
+      // Always show success message (for security - don't reveal if email exists or not)
+      setForgotPasswordSuccess(true)
+      setForgotPasswordEmail("")
+      
+      // Update success message to be more generic
+      setTimeout(() => {
+        setShowForgotPassword(false)
+        setForgotPasswordSuccess(false)
+      }, 5000)
+      
+    } catch (error: any) {
+      console.error("Password reset error:", error)
+      
+      // For security reasons, show the same success message regardless of the error
+      // This prevents email enumeration attacks
+      setForgotPasswordSuccess(true)
+      setForgotPasswordEmail("")
+      
+      // Still log the actual error for debugging
+      console.log("Actual error (hidden from user):", error.code, error.message)
+      
+      setTimeout(() => {
+        setShowForgotPassword(false)
+        setForgotPasswordSuccess(false)
+      }, 5000)
+    } finally {
+      setForgotPasswordLoading(false)
+    }
+  }
+
+  const openForgotPassword = (): void => {
+    setForgotPasswordEmail(email) // Pre-fill with the email from login form
+    setShowForgotPassword(true)
+    setForgotPasswordError("")
+    setForgotPasswordSuccess(false)
+  }
+
+  const closeForgotPassword = (): void => {
+    setShowForgotPassword(false)
+    setForgotPasswordEmail("")
+    setForgotPasswordError("")
+    setForgotPasswordSuccess(false)
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 px-4 py-8">
       <div className="w-full max-w-md">
@@ -222,6 +290,18 @@ export default function Login() {
               )}
             </div>
 
+            {/* Forgot Password Link */}
+            <div className="text-right">
+              <button
+                type="button"
+                onClick={openForgotPassword}
+                disabled={loading}
+                className="text-sm text-blue-600 hover:text-blue-700 font-medium transition disabled:opacity-50"
+              >
+                Forgot your password?
+              </button>
+            </div>
+
             {/* Login Button */}
             <button
               type="button"
@@ -249,6 +329,83 @@ export default function Login() {
           </a>
         </p>
       </div>
+
+      {/* Forgot Password Modal */}
+      {showForgotPassword && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">Reset Your Password</h2>
+              <p className="text-gray-600 mt-2">
+                Enter your email address and we'll send you a link to reset your password.
+              </p>
+            </div>
+
+            {forgotPasswordSuccess ? (
+              <div className="p-4 bg-green-50 border border-green-200 rounded-xl mb-4">
+                <div className="flex items-center gap-2 text-green-700">
+                  <AlertCircle className="w-5 h-5" />
+                  <span className="text-sm font-medium">
+                    Password reset email sent! Check your inbox or spam folder for further instructions.
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <>
+                {forgotPasswordError && (
+                  <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl">
+                    <div className="flex items-center gap-2 text-red-700">
+                      <AlertCircle className="w-5 h-5" />
+                      <span className="text-sm font-medium">{forgotPasswordError}</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mb-6">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Email Address</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input
+                      type="email"
+                      value={forgotPasswordEmail}
+                      onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                      disabled={forgotPasswordLoading}
+                      className="w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition bg-gray-50 focus:bg-white disabled:opacity-50"
+                      placeholder="you@example.com"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={closeForgotPassword}
+                    disabled={forgotPasswordLoading}
+                    className="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-xl font-semibold hover:bg-gray-50 transition disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleForgotPassword}
+                    disabled={forgotPasswordLoading}
+                    className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {forgotPasswordLoading ? (
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        Sending...
+                      </div>
+                    ) : (
+                      "Send Reset Link"
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
